@@ -14,6 +14,11 @@ import type { EmailWithClassification } from "@/types/email";
 
 const BATCH_SIZE = 10;
 
+// Remove zero-width spaces and other invisible characters Gmail adds
+function cleanSnippet(snippet: string): string {
+  return snippet.replace(/[\u034F\u200B-\u200D\uFEFF\u00A0]+/g, "").trim();
+}
+
 interface SessionStats {
   deleted: number;
   archived: number;
@@ -67,12 +72,16 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
   const utils = trpc.useUtils();
 
   // Initial fetch
-  const { data, isLoading: isInitialLoading, error } = trpc.emails.list.useQuery(
+  const {
+    data,
+    isLoading: isInitialLoading,
+    error,
+  } = trpc.emails.list.useQuery(
     { mode, maxResults: BATCH_SIZE * 3 }, // Fetch 3 batches worth
     {
       refetchOnWindowFocus: false,
       enabled: !isInitialized,
-    }
+    },
   );
 
   // Pre-fetch more emails
@@ -81,23 +90,28 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
     {
       enabled: !!nextPageToken && emailBuffer.length < BATCH_SIZE * 2,
       refetchOnWindowFocus: false,
-    }
+    },
   );
 
   // Track which data we've already processed (use state, not refs)
-  const [lastProcessedDataKey, setLastProcessedDataKey] = useState<string | null>(null);
-  const [lastProcessedPrefetchKey, setLastProcessedPrefetchKey] = useState<string | null>(null);
+  const [lastProcessedDataKey, setLastProcessedDataKey] = useState<
+    string | null
+  >(null);
+  const [lastProcessedPrefetchKey, setLastProcessedPrefetchKey] = useState<
+    string | null
+  >(null);
 
   // Derive keys for current data
   const dataKey = data?.emails.map((e) => e.id).join(",") ?? null;
-  const prefetchKey = prefetchQuery.data?.emails.map((e) => e.id).join(",") ?? null;
+  const prefetchKey =
+    prefetchQuery.data?.emails.map((e) => e.id).join(",") ?? null;
 
   // Initialize buffer from initial fetch (runs during render when data key changes)
   if (data && !isInitialized && dataKey && dataKey !== lastProcessedDataKey) {
     setLastProcessedDataKey(dataKey);
-    const filteredEmails = data.emails.filter(
-      (e) => !processedIds.has(e.id) && !skippedIds.has(e.id)
-    );
+    const filteredEmails = data.emails
+      .filter((e) => !processedIds.has(e.id) && !skippedIds.has(e.id))
+      .map((e) => ({ ...e, snippet: cleanSnippet(e.snippet) }));
     setEmailBuffer(filteredEmails);
     setNextPageToken(data.nextPageToken);
     setHasMoreEmails(!!data.nextPageToken || filteredEmails.length > 0);
@@ -116,12 +130,14 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
     prefetchKey !== lastProcessedPrefetchKey
   ) {
     setLastProcessedPrefetchKey(prefetchKey);
-    const newEmails = prefetchQuery.data.emails.filter(
-      (e) =>
-        !processedIds.has(e.id) &&
-        !skippedIds.has(e.id) &&
-        !emailBuffer.some((existing) => existing.id === e.id)
-    );
+    const newEmails = prefetchQuery.data.emails
+      .filter(
+        (e) =>
+          !processedIds.has(e.id) &&
+          !skippedIds.has(e.id) &&
+          !emailBuffer.some((existing) => existing.id === e.id),
+      )
+      .map((e) => ({ ...e, snippet: cleanSnippet(e.snippet) }));
     if (newEmails.length > 0) {
       setEmailBuffer((prev) => [...prev, ...newEmails]);
     }
@@ -193,9 +209,7 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
       newSkipped.forEach((id) => next.add(id));
       return next;
     });
-    setEmailBuffer((prev) =>
-      prev.filter((e) => !currentBatchIds.has(e.id))
-    );
+    setEmailBuffer((prev) => prev.filter((e) => !currentBatchIds.has(e.id)));
     setStats((prev) => ({
       ...prev,
       [mode === "delete" ? "deleted" : "archived"]:
@@ -214,7 +228,7 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
       }
 
       toast.success(
-        `${mode === "delete" ? "Deleted" : "Archived"} ${selectedList.length} email${selectedList.length > 1 ? "s" : ""}`
+        `${mode === "delete" ? "Deleted" : "Archived"} ${selectedList.length} email${selectedList.length > 1 ? "s" : ""}`,
       );
 
       // Auto-select next batch after transition
@@ -237,7 +251,7 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
       setStats(previousStats);
 
       toast.error(
-        `Failed to ${mode}: ${err instanceof Error ? err.message : "Unknown error"}`
+        `Failed to ${mode}: ${err instanceof Error ? err.message : "Unknown error"}`,
       );
     }
   }, [
@@ -296,7 +310,7 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
       stats,
       isComplete,
       mode,
-    ]
+    ],
   );
 
   return (
