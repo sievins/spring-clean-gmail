@@ -38,7 +38,9 @@ export function AnimatedEmailList() {
   }
 
   if (isComplete) {
-    return <CompletionScreen stats={stats} mode={mode} onStartOver={startOver} />;
+    return (
+      <CompletionScreen stats={stats} mode={mode} onStartOver={startOver} />
+    );
   }
 
   if (currentBatch.length === 0) {
@@ -97,7 +99,7 @@ export function AnimatedEmailList() {
         )}
       </div>
 
-      <div className="space-y-2 overflow-hidden" role="list">
+      <div className="overflow-hidden" role="list">
         <AnimatePresence mode="popLayout" initial={false}>
           {currentBatch.map((email, index) => (
             <motion.div
