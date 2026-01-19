@@ -27,7 +27,10 @@ function formatDate(date: Date): string {
     return date.toLocaleDateString(undefined, { weekday: "short" });
   }
   if (diffDays < 365) {
-    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
   }
   return date.toLocaleDateString(undefined, {
     month: "short",
@@ -36,7 +39,11 @@ function formatDate(date: Date): string {
   });
 }
 
-export function EmailRow({ email, selected, onSelectionChange }: EmailRowProps) {
+export function EmailRow({
+  email,
+  selected,
+  onSelectionChange,
+}: EmailRowProps) {
   return (
     <div
       className="flex items-center gap-3 border-b px-3 py-2 transition-colors hover:bg-muted/50"
@@ -49,7 +56,9 @@ export function EmailRow({ email, selected, onSelectionChange }: EmailRowProps) 
       />
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="shrink-0 w-40 truncate font-medium text-sm">{email.from.name}</span>
+        <span className="shrink-0 w-40 truncate font-medium text-sm">
+          {email.from.name}
+        </span>
         {email.hasAttachments && (
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -67,7 +76,9 @@ export function EmailRow({ email, selected, onSelectionChange }: EmailRowProps) 
             <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
           </svg>
         )}
-        <span className="shrink-0 max-w-48 truncate text-sm">{email.subject}</span>
+        <span className="shrink-0 max-w-48 truncate text-sm text-foreground/70">
+          {email.subject}
+        </span>
         <span className="mx-1 text-muted-foreground">—</span>
         <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
           {email.snippet}
