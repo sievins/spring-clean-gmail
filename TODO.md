@@ -1,0 +1,2 @@
+- Group by sender
+- Click email to open it
