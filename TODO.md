@@ -1,3 +1,2 @@
-- Click email to open it
 - Unsubscribe
 - Archive first, so not included in deletions?

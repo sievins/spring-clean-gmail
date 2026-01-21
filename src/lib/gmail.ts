@@ -5,13 +5,28 @@ import { env } from "@/env";
 
 const gmail = google.gmail("v1");
 
+interface GmailMessagePart {
+  mimeType?: string;
+  filename?: string;
+  body?: {
+    size?: number;
+    data?: string;
+  };
+  parts?: GmailMessagePart[];
+}
+
 interface GmailMessage {
   id: string;
   threadId: string;
   labelIds?: string[];
   payload?: {
     headers?: Array<{ name: string; value: string }>;
-    parts?: Array<{ filename?: string }>;
+    parts?: GmailMessagePart[];
+    mimeType?: string;
+    body?: {
+      size?: number;
+      data?: string;
+    };
   };
   snippet?: string;
   internalDate?: string;
@@ -244,4 +259,108 @@ export async function archiveEmails(
       },
     })
   );
+}
+
+function decodeBase64Url(data: string): string {
+  // Gmail uses URL-safe base64 encoding
+  const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
+  return Buffer.from(base64, "base64").toString("utf-8");
+}
+
+interface ExtractedBody {
+  content: string;
+  isHtml: boolean;
+}
+
+function extractHtmlFromParts(parts: GmailMessagePart[] | undefined): ExtractedBody | null {
+  if (!parts) return null;
+
+  // First, prefer HTML content
+  for (const part of parts) {
+    if (part.mimeType === "text/html" && part.body?.data) {
+      return { content: decodeBase64Url(part.body.data), isHtml: true };
+    }
+  }
+
+  // Fall back to plain text
+  for (const part of parts) {
+    if (part.mimeType === "text/plain" && part.body?.data) {
+      return { content: decodeBase64Url(part.body.data), isHtml: false };
+    }
+  }
+
+  // Check nested parts (multipart/alternative, multipart/mixed, etc.)
+  for (const part of parts) {
+    if (part.parts) {
+      const result = extractHtmlFromParts(part.parts);
+      if (result) return result;
+    }
+  }
+
+  return null;
+}
+
+function extractEmailBody(message: GmailMessage): ExtractedBody {
+  const payload = message.payload;
+  if (!payload) return { content: "", isHtml: false };
+
+  // Simple message with body directly in payload
+  if (payload.body?.data) {
+    if (payload.mimeType === "text/html") {
+      return { content: decodeBase64Url(payload.body.data), isHtml: true };
+    }
+    if (payload.mimeType === "text/plain") {
+      return { content: decodeBase64Url(payload.body.data), isHtml: false };
+    }
+  }
+
+  // Multipart message - extract from parts
+  return extractHtmlFromParts(payload.parts) ?? { content: "", isHtml: false };
+}
+
+export interface EmailContent {
+  id: string;
+  threadId: string;
+  from: { name: string; email: string };
+  to: string;
+  subject: string;
+  body: string;
+  isHtml: boolean;
+  date: Date;
+  hasAttachments: boolean;
+}
+
+export async function fetchEmailContent(
+  accessToken: string,
+  emailId: string
+): Promise<EmailContent> {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+
+  const response = await withRetry(() =>
+    gmail.users.messages.get({
+      auth,
+      userId: "me",
+      id: emailId,
+      format: "full",
+    })
+  );
+
+  const message = response.data as GmailMessage;
+  const headers = message.payload?.headers;
+  const { content, isHtml } = extractEmailBody(message);
+
+  return {
+    id: message.id,
+    threadId: message.threadId,
+    from: parseFromHeader(getHeader(headers, "From")),
+    to: getHeader(headers, "To"),
+    subject: getHeader(headers, "Subject") || "(no subject)",
+    body: content,
+    isHtml,
+    date: message.internalDate
+      ? new Date(parseInt(message.internalDate))
+      : new Date(),
+    hasAttachments: hasAttachments(message),
+  };
 }

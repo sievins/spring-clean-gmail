@@ -7,6 +7,7 @@ interface EmailRowProps {
   email: EmailWithClassification;
   selected: boolean;
   onSelectionChange: (selected: boolean) => void;
+  onEmailClick: () => void;
 }
 
 function formatDate(date: Date): string {
@@ -43,17 +44,21 @@ export function EmailRow({
   email,
   selected,
   onSelectionChange,
+  onEmailClick,
 }: EmailRowProps) {
   return (
     <div
-      className="flex items-center gap-3 border-b px-3 py-2 transition-colors hover:bg-muted/50"
+      className="flex items-center gap-3 border-b px-3 py-2 transition-colors hover:bg-muted/50 cursor-pointer"
       role="row"
+      onClick={onEmailClick}
     >
-      <Checkbox
-        id={`email-${email.id}`}
-        checked={selected}
-        onCheckedChange={(checked) => onSelectionChange(checked === true)}
-      />
+      <div onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          id={`email-${email.id}`}
+          checked={selected}
+          onCheckedChange={(checked) => onSelectionChange(checked === true)}
+        />
+      </div>
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="shrink-0 w-40 truncate font-medium text-sm">

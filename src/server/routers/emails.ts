@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
-import { fetchEmails, deleteEmails, archiveEmails } from "@/lib/gmail";
+import { fetchEmails, deleteEmails, archiveEmails, fetchEmailContent } from "@/lib/gmail";
 
 export const emailsRouter = router({
   list: protectedProcedure
@@ -41,5 +41,16 @@ export const emailsRouter = router({
     .mutation(async ({ ctx, input }) => {
       await archiveEmails(ctx.accessToken, input.emailIds);
       return { success: true, count: input.emailIds.length };
+    }),
+
+  get: protectedProcedure
+    .input(
+      z.object({
+        emailId: z.string(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const content = await fetchEmailContent(ctx.accessToken, input.emailId);
+      return content;
     }),
 });

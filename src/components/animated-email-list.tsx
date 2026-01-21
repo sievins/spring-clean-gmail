@@ -1,11 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmailRow } from "@/components/email-row";
 import { EmailListSkeleton } from "@/components/email-skeleton";
 import { CompletionScreen } from "@/components/completion-screen";
+import { EmailDetailDialog } from "@/components/email-detail-dialog";
 import { useEmails } from "@/components/email-context";
+import type { EmailWithClassification } from "@/types/email";
 
 export function AnimatedEmailList() {
   const {
@@ -21,6 +24,14 @@ export function AnimatedEmailList() {
     mode,
     startOver,
   } = useEmails();
+
+  const [selectedEmail, setSelectedEmail] = useState<EmailWithClassification | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  const handleEmailClick = (email: EmailWithClassification) => {
+    setSelectedEmail(email);
+    setIsDialogOpen(true);
+  };
 
   if (isLoading) {
     return <EmailListSkeleton />;
@@ -120,11 +131,18 @@ export function AnimatedEmailList() {
                 onSelectionChange={(selected) =>
                   toggleSelection(email.id, selected)
                 }
+                onEmailClick={() => handleEmailClick(email)}
               />
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
+
+      <EmailDetailDialog
+        email={selectedEmail}
+        open={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
+      />
     </div>
   );
 }
