@@ -123,3 +123,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Sonner toast - dynamic width */
+[data-sonner-toaster] [data-sonner-toast] {
+  --width: fit-content;
+}
