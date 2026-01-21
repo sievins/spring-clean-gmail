@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import type { Email, EmailWithClassification } from "@/types/email";
 import { classifyEmail } from "./classifier";
+import { env } from "@/env";
 
 const gmail = google.gmail("v1");
 
@@ -116,18 +117,18 @@ export async function fetchEmails(
   accessToken: string,
   mode: "delete" | "archive",
   pageToken?: string,
-  maxResults = 20,
   userEmail?: string
 ): Promise<FetchEmailsResult> {
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: accessToken });
 
   // Fetch message list - exclude starred and very recent
+  // Use env.GMAIL_FETCH_LIMIT (max 500) to get as many emails as possible for grouping by sender
   const listResponse = await withRetry(() =>
     gmail.users.messages.list({
       auth,
       userId: "me",
-      maxResults: maxResults * 2, // Fetch more to filter
+      maxResults: env.GMAIL_FETCH_LIMIT,
       pageToken,
       q: "in:inbox -is:starred older_than:1d",
     })
@@ -191,11 +192,13 @@ export async function fetchEmails(
     }
   });
 
-  // Take only maxResults
-  const emails = filteredEmails.slice(0, maxResults);
+  // Sort by sender email to group emails from the same sender together
+  const sortedEmails = filteredEmails.sort((a, b) =>
+    a.from.email.toLowerCase().localeCompare(b.from.email.toLowerCase())
+  );
 
   return {
-    emails,
+    emails: sortedEmails,
     nextPageToken: listResponse.data.nextPageToken ?? undefined,
   };
 }

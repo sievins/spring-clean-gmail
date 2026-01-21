@@ -77,16 +77,16 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
     isLoading: isInitialLoading,
     error,
   } = trpc.emails.list.useQuery(
-    { mode, maxResults: BATCH_SIZE * 3 }, // Fetch 3 batches worth
+    { mode },
     {
       refetchOnWindowFocus: false,
       enabled: !isInitialized,
     },
   );
 
-  // Pre-fetch more emails
+  // Pre-fetch more emails when buffer runs low
   const prefetchQuery = trpc.emails.list.useQuery(
-    { mode, maxResults: BATCH_SIZE * 2, pageToken: nextPageToken },
+    { mode, pageToken: nextPageToken },
     {
       enabled: !!nextPageToken && emailBuffer.length < BATCH_SIZE * 2,
       refetchOnWindowFocus: false,

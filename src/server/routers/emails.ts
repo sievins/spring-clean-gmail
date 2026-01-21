@@ -8,7 +8,6 @@ export const emailsRouter = router({
       z.object({
         mode: z.enum(["delete", "archive"]),
         pageToken: z.string().optional(),
-        maxResults: z.number().min(1).max(50).default(10),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -17,7 +16,6 @@ export const emailsRouter = router({
         ctx.accessToken,
         input.mode,
         input.pageToken,
-        input.maxResults,
         userEmail
       );
       return result;
