@@ -7,8 +7,9 @@ interface CompletionScreenProps {
   stats: {
     deleted: number;
     archived: number;
+    unsubscribed: number;
   };
-  mode: "delete" | "archive";
+  mode: "delete" | "archive" | "unsubscribe";
   onStartOver: () => void;
 }
 
@@ -17,7 +18,7 @@ export function CompletionScreen({
   mode,
   onStartOver,
 }: CompletionScreenProps) {
-  const totalProcessed = stats.deleted + stats.archived;
+  const totalProcessed = stats.deleted + stats.archived + stats.unsubscribed;
 
   return (
     <motion.div
@@ -54,7 +55,9 @@ export function CompletionScreen({
           ? `You cleaned up ${totalProcessed} email${totalProcessed > 1 ? "s" : ""} this session.`
           : mode === "delete"
             ? "No more promotional emails to delete."
-            : "No more emails to archive."}
+            : mode === "archive"
+              ? "No more emails to archive."
+              : "No more mailing lists to unsubscribe from."}
       </motion.p>
 
       {totalProcessed > 0 && (
@@ -78,6 +81,14 @@ export function CompletionScreen({
                 {stats.archived}
               </span>
               <span className="text-muted-foreground">archived</span>
+            </div>
+          )}
+          {stats.unsubscribed > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500/10 text-xs text-orange-500">
+                {stats.unsubscribed}
+              </span>
+              <span className="text-muted-foreground">unsubscribed</span>
             </div>
           )}
         </motion.div>

@@ -12,13 +12,15 @@ export interface Email {
   hasAttachments: boolean;
   // Classification metadata
   hasListUnsubscribe: boolean;
+  listUnsubscribe?: string; // List-Unsubscribe header value (mailto: or https:// URLs)
+  listUnsubscribePost?: string; // List-Unsubscribe-Post header (indicates one-click unsubscribe support)
   isUnread: boolean;
   isStarred: boolean;
   threadMessageCount: number;
 }
 
 export interface ClassificationResult {
-  action: "delete" | "archive" | "keep";
+  action: "delete" | "archive" | "keep" | "unsubscribe";
   confidence: number;
   reasons: string[];
 }
@@ -41,5 +43,6 @@ export interface SessionState {
   stats: {
     deleted: number;
     archived: number;
+    unsubscribed: number;
   };
 }
