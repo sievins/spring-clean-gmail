@@ -6,7 +6,7 @@ import { useEmails } from "@/components/email-context";
 export function ActionBar() {
   const {
     selectedIds,
-    deselectAll,
+    skipBatch,
     processSelected,
     isProcessing,
     mode,
@@ -16,7 +16,7 @@ export function ActionBar() {
   } = useEmails();
 
   const hasSelection = selectedIds.size > 0;
-  const hasActivity = stats.deleted > 0 || stats.archived > 0;
+  const hasActivity = stats.deleted > 0 || stats.archived > 0 || stats.unsubscribed > 0;
 
   // Don't show action bar if complete
   if (isComplete) {
@@ -29,7 +29,9 @@ export function ActionBar() {
         <p className="text-sm text-muted-foreground">
           {mode === "delete"
             ? "Selected emails will be permanently deleted"
-            : "Selected emails will be moved out of your inbox"}
+            : mode === "archive"
+              ? "Selected emails will be moved out of your inbox"
+              : "You will be unsubscribed from selected mailing lists"}
         </p>
         <div className="flex gap-2">
           {hasActivity && (
@@ -40,8 +42,8 @@ export function ActionBar() {
           <Button
             variant="outline"
             size="sm"
-            onClick={deselectAll}
-            disabled={!hasSelection || isProcessing}
+            onClick={skipBatch}
+            disabled={isProcessing}
           >
             Skip All
           </Button>
@@ -56,7 +58,7 @@ export function ActionBar() {
                 ? "Deleting..."
                 : `Delete ${selectedIds.size} Selected`}
             </Button>
-          ) : (
+          ) : mode === "archive" ? (
             <Button
               size="sm"
               onClick={processSelected}
@@ -65,6 +67,17 @@ export function ActionBar() {
               {isProcessing
                 ? "Archiving..."
                 : `Archive ${selectedIds.size} Selected`}
+            </Button>
+          ) : (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={processSelected}
+              disabled={!hasSelection || isProcessing}
+            >
+              {isProcessing
+                ? "Unsubscribing..."
+                : `Unsubscribe from ${selectedIds.size} Selected`}
             </Button>
           )}
         </div>

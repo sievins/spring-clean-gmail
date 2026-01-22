@@ -58,13 +58,17 @@ export function AnimatedEmailList() {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
         <div className="text-4xl">
-          {mode === "delete" ? "\u2728" : "\ud83d\udce5"}
+          {mode === "delete" ? "\u2728" : mode === "archive" ? "\ud83d\udce5" : "\ud83d\udeab"}
         </div>
-        <h3 className="mt-4 text-lg font-medium">No emails to {mode}</h3>
+        <h3 className="mt-4 text-lg font-medium">
+          {mode === "unsubscribe" ? "No mailing lists to unsubscribe from" : `No emails to ${mode}`}
+        </h3>
         <p className="mt-2 text-sm text-muted-foreground">
           {mode === "delete"
             ? "No promotional or outdated emails found. Your inbox is looking clean!"
-            : "No emails need archiving right now. Check back later."}
+            : mode === "archive"
+              ? "No emails need archiving right now. Check back later."
+              : "No emails with unsubscribe links found. You're all set!"}
         </p>
       </div>
     );
@@ -101,11 +105,13 @@ export function AnimatedEmailList() {
             ? "Select all"
             : `${selectedIds.size} of ${currentBatch.length} selected`}
         </label>
-        {(stats.deleted > 0 || stats.archived > 0) && (
+        {(stats.deleted > 0 || stats.archived > 0 || stats.unsubscribed > 0) && (
           <span className="ml-auto text-xs text-muted-foreground">
             Session: {stats.deleted > 0 && `${stats.deleted} deleted`}
-            {stats.deleted > 0 && stats.archived > 0 && ", "}
+            {stats.deleted > 0 && (stats.archived > 0 || stats.unsubscribed > 0) && ", "}
             {stats.archived > 0 && `${stats.archived} archived`}
+            {stats.archived > 0 && stats.unsubscribed > 0 && ", "}
+            {stats.unsubscribed > 0 && `${stats.unsubscribed} unsubscribed`}
           </span>
         )}
       </div>

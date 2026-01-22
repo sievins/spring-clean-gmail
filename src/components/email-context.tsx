@@ -22,6 +22,7 @@ function cleanSnippet(snippet: string): string {
 interface SessionStats {
   deleted: number;
   archived: number;
+  unsubscribed: number;
 }
 
 interface EmailContextValue {
@@ -39,26 +40,28 @@ interface EmailContextValue {
   deselectAll: () => void;
   toggleSelection: (emailId: string, selected: boolean) => void;
   processSelected: () => Promise<void>;
+  skipBatch: () => void;
   startOver: () => void;
 
   // Session state
   stats: SessionStats;
   isComplete: boolean;
-  mode: "delete" | "archive";
+  mode: "delete" | "archive" | "unsubscribe";
 }
 
 const EmailContext = createContext<EmailContextValue | null>(null);
 
 interface EmailProviderProps {
   children: ReactNode;
-  mode: "delete" | "archive";
+  mode: "delete" | "archive" | "unsubscribe";
 }
 
 export function EmailProvider({ children, mode }: EmailProviderProps) {
   // Session state
   const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
   const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set());
-  const [stats, setStats] = useState<SessionStats>({ deleted: 0, archived: 0 });
+  const [skippedSenders, setSkippedSenders] = useState<Set<string>>(new Set()); // For unsubscribe mode
+  const [stats, setStats] = useState<SessionStats>({ deleted: 0, archived: 0, unsubscribed: 0 });
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -110,7 +113,11 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
   if (data && !isInitialized && dataKey && dataKey !== lastProcessedDataKey) {
     setLastProcessedDataKey(dataKey);
     const filteredEmails = data.emails
-      .filter((e) => !processedIds.has(e.id) && !skippedIds.has(e.id))
+      .filter((e) =>
+        !processedIds.has(e.id) &&
+        !skippedIds.has(e.id) &&
+        !(mode === "unsubscribe" && skippedSenders.has(e.from.email.toLowerCase()))
+      )
       .map((e) => ({ ...e, snippet: cleanSnippet(e.snippet) }));
     setEmailBuffer(filteredEmails);
     setNextPageToken(data.nextPageToken);
@@ -130,16 +137,20 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
     prefetchKey !== lastProcessedPrefetchKey
   ) {
     setLastProcessedPrefetchKey(prefetchKey);
-    const newEmails = prefetchQuery.data.emails
-      .filter(
-        (e) =>
-          !processedIds.has(e.id) &&
-          !skippedIds.has(e.id) &&
-          !emailBuffer.some((existing) => existing.id === e.id),
+    const prefetchedEmails = prefetchQuery.data.emails
+      .filter((e) =>
+        !processedIds.has(e.id) &&
+        !skippedIds.has(e.id) &&
+        !(mode === "unsubscribe" && skippedSenders.has(e.from.email.toLowerCase()))
       )
       .map((e) => ({ ...e, snippet: cleanSnippet(e.snippet) }));
-    if (newEmails.length > 0) {
-      setEmailBuffer((prev) => [...prev, ...newEmails]);
+    if (prefetchedEmails.length > 0) {
+      // Use functional update to avoid race conditions with skipBatch
+      setEmailBuffer((prev) => {
+        const existingIds = new Set(prev.map((e) => e.id));
+        const newEmails = prefetchedEmails.filter((e) => !existingIds.has(e.id));
+        return [...prev, ...newEmails];
+      });
     }
     if (prefetchQuery.data.nextPageToken) {
       setNextPageToken(prefetchQuery.data.nextPageToken);
@@ -161,6 +172,7 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
   // Mutations
   const deleteMutation = trpc.emails.delete.useMutation();
   const archiveMutation = trpc.emails.archive.useMutation();
+  const unsubscribeMutation = trpc.emails.unsubscribe.useMutation();
 
   const selectAll = useCallback(() => {
     setSelectedIds(new Set(currentBatch.map((e) => e.id)));
@@ -182,21 +194,64 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
     });
   }, []);
 
+  const skipBatch = useCallback(() => {
+    if (currentBatch.length === 0) return;
+
+    // Mark all current batch emails as skipped
+    const currentBatchIds = new Set(currentBatch.map((e) => e.id));
+
+    // In unsubscribe mode, also track skipped senders to filter out all their emails
+    let remaining = emailBuffer.filter((e) => !currentBatchIds.has(e.id));
+    if (mode === "unsubscribe") {
+      const sendersToSkip = new Set(currentBatch.map((e) => e.from.email.toLowerCase()));
+      remaining = remaining.filter((e) => !sendersToSkip.has(e.from.email.toLowerCase()));
+      setSkippedSenders((prev) => {
+        const next = new Set(prev);
+        sendersToSkip.forEach((sender) => next.add(sender));
+        return next;
+      });
+    }
+
+    const nextBatchIds = remaining.slice(0, BATCH_SIZE).map((e) => e.id);
+
+    setSkippedIds((prev) => {
+      const next = new Set(prev);
+      currentBatchIds.forEach((id) => next.add(id));
+      return next;
+    });
+    setEmailBuffer(remaining);
+    setSelectedIds(new Set(nextBatchIds));
+  }, [currentBatch, emailBuffer, mode]);
+
   const processSelected = useCallback(async () => {
     const selectedList = Array.from(selectedIds);
     if (selectedList.length === 0) return;
 
     // Get skipped emails (in current batch but not selected)
     const currentBatchIds = new Set(currentBatch.map((e) => e.id));
-    const newSkipped = currentBatch
-      .filter((e) => !selectedIds.has(e.id))
-      .map((e) => e.id);
+    const skippedEmails = currentBatch.filter((e) => !selectedIds.has(e.id));
+    const newSkipped = skippedEmails.map((e) => e.id);
 
     // Optimistically update UI
     const previousBuffer = [...emailBuffer];
     const previousProcessed = new Set(processedIds);
     const previousSkipped = new Set(skippedIds);
+    const previousSkippedSenders = new Set(skippedSenders);
     const previousStats = { ...stats };
+
+    // In unsubscribe mode, track skipped senders and filter out all their emails
+    let remaining = emailBuffer.filter((e) => !currentBatchIds.has(e.id));
+    if (mode === "unsubscribe" && skippedEmails.length > 0) {
+      const sendersToSkip = new Set(skippedEmails.map((e) => e.from.email.toLowerCase()));
+      remaining = remaining.filter((e) => !sendersToSkip.has(e.from.email.toLowerCase()));
+      setSkippedSenders((prev) => {
+        const next = new Set(prev);
+        sendersToSkip.forEach((sender) => next.add(sender));
+        return next;
+      });
+    }
+
+    const nextBatchIds = remaining.slice(0, BATCH_SIZE).map((e) => e.id);
 
     // Update state optimistically
     setProcessedIds((prev) => {
@@ -209,45 +264,45 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
       newSkipped.forEach((id) => next.add(id));
       return next;
     });
-    setEmailBuffer((prev) => prev.filter((e) => !currentBatchIds.has(e.id)));
+    setEmailBuffer(remaining);
+
+    const statKey = mode === "delete" ? "deleted" : mode === "archive" ? "archived" : "unsubscribed";
     setStats((prev) => ({
       ...prev,
-      [mode === "delete" ? "deleted" : "archived"]:
-        prev[mode === "delete" ? "deleted" : "archived"] + selectedList.length,
+      [statKey]: prev[statKey] + selectedList.length,
     }));
 
-    // Clear selection
-    setSelectedIds(new Set());
+    // Auto-select next batch immediately
+    setSelectedIds(new Set(nextBatchIds));
 
     try {
       // Call API
       if (mode === "delete") {
         await deleteMutation.mutateAsync({ emailIds: selectedList });
-      } else {
+      } else if (mode === "archive") {
         await archiveMutation.mutateAsync({ emailIds: selectedList });
+      } else {
+        // Unsubscribe mode - need to pass email data with unsubscribe headers
+        const selectedEmails = currentBatch
+          .filter((e) => selectedIds.has(e.id) && e.listUnsubscribe)
+          .map((e) => ({
+            id: e.id,
+            listUnsubscribe: e.listUnsubscribe!,
+            listUnsubscribePost: e.listUnsubscribePost,
+          }));
+        await unsubscribeMutation.mutateAsync({ emails: selectedEmails });
       }
 
+      const actionText = mode === "delete" ? "Deleted" : mode === "archive" ? "Archived" : "Unsubscribed from";
       toast.success(
-        `${mode === "delete" ? "Deleted" : "Archived"} ${selectedList.length} email${selectedList.length > 1 ? "s" : ""}`,
+        `${actionText} ${selectedList.length} email${selectedList.length > 1 ? "s" : ""}`,
       );
-
-      // Auto-select next batch after transition
-      setTimeout(() => {
-        setSelectedIds((prev) => {
-          if (prev.size === 0) {
-            const nextBatch = emailBuffer
-              .filter((e) => !currentBatchIds.has(e.id))
-              .slice(0, BATCH_SIZE);
-            return new Set(nextBatch.map((e) => e.id));
-          }
-          return prev;
-        });
-      }, 350);
     } catch (err) {
       // Revert on error
       setEmailBuffer(previousBuffer);
       setProcessedIds(previousProcessed);
       setSkippedIds(previousSkipped);
+      setSkippedSenders(previousSkippedSenders);
       setStats(previousStats);
 
       toast.error(
@@ -260,16 +315,19 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
     emailBuffer,
     processedIds,
     skippedIds,
+    skippedSenders,
     stats,
     mode,
     deleteMutation,
     archiveMutation,
+    unsubscribeMutation,
   ]);
 
   const startOver = useCallback(() => {
     setProcessedIds(new Set());
     setSkippedIds(new Set());
-    setStats({ deleted: 0, archived: 0 });
+    setSkippedSenders(new Set());
+    setStats({ deleted: 0, archived: 0, unsubscribed: 0 });
     setSelectedIds(new Set());
     setEmailBuffer([]);
     setNextPageToken(undefined);
@@ -283,12 +341,13 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
       currentBatch,
       selectedIds,
       isLoading: isInitialLoading && !isInitialized,
-      isProcessing: deleteMutation.isPending || archiveMutation.isPending,
+      isProcessing: deleteMutation.isPending || archiveMutation.isPending || unsubscribeMutation.isPending,
       error: error as Error | null,
       selectAll,
       deselectAll,
       toggleSelection,
       processSelected,
+      skipBatch,
       startOver,
       stats,
       isComplete,
@@ -301,11 +360,13 @@ export function EmailProvider({ children, mode }: EmailProviderProps) {
       isInitialized,
       deleteMutation.isPending,
       archiveMutation.isPending,
+      unsubscribeMutation.isPending,
       error,
       selectAll,
       deselectAll,
       toggleSelection,
       processSelected,
+      skipBatch,
       startOver,
       stats,
       isComplete,

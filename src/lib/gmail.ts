@@ -1,6 +1,6 @@
 import { google } from "googleapis";
 import type { Email, EmailWithClassification } from "@/types/email";
-import { classifyEmail } from "./classifier";
+import { classifyEmail, classifyForUnsubscribe } from "./classifier";
 import { env } from "@/env";
 
 const gmail = google.gmail("v1");
@@ -74,6 +74,7 @@ function transformMessage(
   const from = getHeader(headers, "From");
   const subject = getHeader(headers, "Subject");
   const listUnsubscribe = getHeader(headers, "List-Unsubscribe");
+  const listUnsubscribePost = getHeader(headers, "List-Unsubscribe-Post");
   const date = message.internalDate
     ? new Date(parseInt(message.internalDate))
     : new Date();
@@ -90,6 +91,8 @@ function transformMessage(
     labels,
     hasAttachments: hasAttachments(message),
     hasListUnsubscribe: !!listUnsubscribe,
+    listUnsubscribe: listUnsubscribe || undefined,
+    listUnsubscribePost: listUnsubscribePost || undefined,
     isUnread: labels.includes("UNREAD"),
     isStarred: labels.includes("STARRED"),
     threadMessageCount,
@@ -130,7 +133,7 @@ async function withRetry<T>(
 
 export async function fetchEmails(
   accessToken: string,
-  mode: "delete" | "archive",
+  mode: "delete" | "archive" | "unsubscribe",
   pageToken?: string,
   userEmail?: string
 ): Promise<FetchEmailsResult> {
@@ -164,7 +167,7 @@ export async function fetchEmails(
           userId: "me",
           id: msg.id!,
           format: "metadata",
-          metadataHeaders: ["From", "Subject", "Date", "List-Unsubscribe"],
+          metadataHeaders: ["From", "Subject", "Date", "List-Unsubscribe", "List-Unsubscribe-Post"],
         })
       ),
       withRetry(() =>
@@ -184,11 +187,10 @@ export async function fetchEmails(
       threadMessageCount
     );
 
-    // Classify the email
-    const classification = classifyEmail({
-      ...email,
-      userEmail,
-    });
+    // Classify the email based on mode
+    const classification = mode === "unsubscribe"
+      ? classifyForUnsubscribe({ ...email, userEmail })
+      : classifyEmail({ ...email, userEmail });
 
     return {
       ...email,
@@ -202,8 +204,10 @@ export async function fetchEmails(
   const filteredEmails = allEmails.filter((email) => {
     if (mode === "delete") {
       return email.classification.action === "delete";
-    } else {
+    } else if (mode === "archive") {
       return email.classification.action === "archive";
+    } else {
+      return email.classification.action === "unsubscribe";
     }
   });
 
@@ -259,6 +263,185 @@ export async function archiveEmails(
       },
     })
   );
+}
+
+interface UnsubscribeResult {
+  emailId: string;
+  success: boolean;
+  method?: "one-click" | "https" | "mailto";
+  error?: string;
+}
+
+function parseUnsubscribeHeader(header: string): { urls: string[]; mailto?: string } {
+  const urls: string[] = [];
+  let mailto: string | undefined;
+
+  // Header format: <URL1>, <URL2>, <mailto:address>
+  const parts = header.split(",").map((p) => p.trim());
+  for (const part of parts) {
+    // Extract URL from angle brackets if present
+    const match = part.match(/<([^>]+)>/);
+    const url = match ? match[1] : part;
+
+    if (url.toLowerCase().startsWith("mailto:")) {
+      mailto = url;
+    } else if (url.startsWith("http://") || url.startsWith("https://")) {
+      urls.push(url);
+    }
+  }
+
+  return { urls, mailto };
+}
+
+async function unsubscribeOneClick(
+  url: string
+): Promise<boolean> {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "List-Unsubscribe=One-Click",
+    });
+    // Accept 200-299 and 3xx redirects as success (many unsubscribe endpoints redirect)
+    return response.ok || (response.status >= 300 && response.status < 400);
+  } catch {
+    return false;
+  }
+}
+
+async function unsubscribeViaUrl(url: string): Promise<boolean> {
+  try {
+    // Try POST first (some services expect POST)
+    const postResponse = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+    if (postResponse.ok || (postResponse.status >= 300 && postResponse.status < 400)) {
+      return true;
+    }
+
+    // Fall back to GET
+    const getResponse = await fetch(url, { method: "GET" });
+    return getResponse.ok || (getResponse.status >= 300 && getResponse.status < 400);
+  } catch {
+    return false;
+  }
+}
+
+async function unsubscribeViaMailto(
+  accessToken: string,
+  mailto: string
+): Promise<boolean> {
+  try {
+    const auth = new google.auth.OAuth2();
+    auth.setCredentials({ access_token: accessToken });
+
+    // Parse mailto URL: mailto:address?subject=xxx&body=xxx
+    const url = new URL(mailto);
+    const to = url.pathname;
+    const subject = url.searchParams.get("subject") || "Unsubscribe";
+    const body = url.searchParams.get("body") || "Please unsubscribe me from this mailing list.";
+
+    // Create raw email
+    const email = [
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      body,
+    ].join("\r\n");
+
+    // Base64url encode
+    const encodedEmail = Buffer.from(email)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+
+    await withRetry(() =>
+      gmail.users.messages.send({
+        auth,
+        userId: "me",
+        requestBody: {
+          raw: encodedEmail,
+        },
+      })
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function unsubscribeFromEmail(
+  accessToken: string,
+  emailId: string,
+  listUnsubscribe: string,
+  listUnsubscribePost?: string
+): Promise<UnsubscribeResult> {
+  const { urls, mailto } = parseUnsubscribeHeader(listUnsubscribe);
+  const httpsUrl = urls.find((u) => u.startsWith("https://"));
+
+  // 1. Try One-Click Unsubscribe (RFC 8058) if supported
+  if (listUnsubscribePost?.toLowerCase().includes("list-unsubscribe=one-click") && httpsUrl) {
+    const success = await unsubscribeOneClick(httpsUrl);
+    if (success) {
+      return { emailId, success: true, method: "one-click" };
+    }
+  }
+
+  // 2. Try HTTPS URL
+  if (httpsUrl) {
+    const success = await unsubscribeViaUrl(httpsUrl);
+    if (success) {
+      return { emailId, success: true, method: "https" };
+    }
+  }
+
+  // 3. Try mailto as last resort
+  if (mailto) {
+    const success = await unsubscribeViaMailto(accessToken, mailto);
+    if (success) {
+      return { emailId, success: true, method: "mailto" };
+    }
+  }
+
+  return {
+    emailId,
+    success: false,
+    error: "No unsubscribe method succeeded",
+  };
+}
+
+export async function unsubscribeFromEmails(
+  accessToken: string,
+  emails: Array<{ id: string; listUnsubscribe: string; listUnsubscribePost?: string }>
+): Promise<{ successful: number; failed: number; results: UnsubscribeResult[] }> {
+  const results: UnsubscribeResult[] = [];
+
+  // Process unsubscribes sequentially to avoid rate limiting
+  for (const email of emails) {
+    const result = await unsubscribeFromEmail(
+      accessToken,
+      email.id,
+      email.listUnsubscribe,
+      email.listUnsubscribePost
+    );
+    results.push(result);
+
+    // Small delay between requests to be respectful
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  const successful = results.filter((r) => r.success).length;
+  const failed = results.filter((r) => !r.success).length;
+
+  return { successful, failed, results };
 }
 
 function decodeBase64Url(data: string): string {

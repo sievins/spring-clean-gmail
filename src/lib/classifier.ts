@@ -1,13 +1,15 @@
 import type { Email } from "@/types/email";
 
 export interface ClassificationResult {
-  action: "delete" | "archive" | "keep";
+  action: "delete" | "archive" | "keep" | "unsubscribe";
   confidence: number;
   reasons: string[];
 }
 
 interface ClassificationContext extends Email {
   hasListUnsubscribe: boolean;
+  listUnsubscribe?: string;
+  listUnsubscribePost?: string;
   isUnread: boolean;
   isStarred: boolean;
   threadMessageCount: number;
@@ -367,5 +369,87 @@ export function classifyEmail(context: ClassificationContext): ClassificationRes
     action: "keep",
     confidence: 0.3,
     reasons: ["No clear delete/archive signals"],
+  };
+}
+
+export function classifyForUnsubscribe(context: ClassificationContext): ClassificationResult {
+  const reasons: string[] = [];
+  let score = 0;
+
+  // Must have List-Unsubscribe header to be unsubscribable
+  if (!context.hasListUnsubscribe || !context.listUnsubscribe) {
+    return {
+      action: "keep",
+      confidence: 1,
+      reasons: ["No unsubscribe header"],
+    };
+  }
+
+  // Starred emails - skip
+  if (context.isStarred || context.labels.includes("STARRED")) {
+    return {
+      action: "keep",
+      confidence: 1,
+      reasons: ["Starred email"],
+    };
+  }
+
+  // Check for One-Click Unsubscribe support (RFC 8058)
+  if (context.listUnsubscribePost?.toLowerCase().includes("list-unsubscribe=one-click")) {
+    score += 40;
+    reasons.push("One-click unsubscribe supported");
+  }
+
+  // Check for https:// URL in List-Unsubscribe
+  const hasHttpsUrl = context.listUnsubscribe.includes("https://");
+  if (hasHttpsUrl) {
+    score += 30;
+    reasons.push("Web unsubscribe link available");
+  }
+
+  // Check for mailto: in List-Unsubscribe
+  const hasMailto = context.listUnsubscribe.toLowerCase().includes("mailto:");
+  if (hasMailto && !hasHttpsUrl) {
+    score += 20;
+    reasons.push("Email unsubscribe available");
+  }
+
+  // Promotional labels increase confidence
+  if (context.labels.includes("CATEGORY_PROMOTIONS")) {
+    score += 15;
+    reasons.push("Promotional email");
+  }
+
+  if (context.labels.includes("CATEGORY_UPDATES")) {
+    score += 10;
+    reasons.push("Updates/notifications");
+  }
+
+  // Marketing patterns in sender
+  const senderEmail = context.from.email.toLowerCase();
+  if (matchesPatterns(senderEmail, PROMO_SENDER_PATTERNS)) {
+    score += 10;
+    reasons.push("Automated sender");
+  }
+
+  // Marketing patterns in subject
+  if (matchesPatterns(context.subject, DELETE_SUBJECT_PATTERNS)) {
+    score += 15;
+    reasons.push("Promotional content");
+  }
+
+  // Must have some unsubscribe mechanism available
+  if (score >= 20) {
+    return {
+      action: "unsubscribe",
+      confidence: Math.min(score / 80, 1),
+      reasons: [...new Set(reasons)],
+    };
+  }
+
+  return {
+    action: "keep",
+    confidence: 0.3,
+    reasons: ["Insufficient unsubscribe signals"],
   };
 }

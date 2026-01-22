@@ -6,7 +6,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function TabNav() {
   const pathname = usePathname();
-  const currentTab = pathname.includes("/archive") ? "archive" : "delete";
+  const currentTab = pathname.includes("/archive")
+    ? "archive"
+    : pathname.includes("/unsubscribe")
+      ? "unsubscribe"
+      : "delete";
 
   return (
     <Tabs value={currentTab}>
@@ -16,6 +20,9 @@ export function TabNav() {
         </TabsTrigger>
         <TabsTrigger value="archive" asChild>
           <Link href="/archive">Archive</Link>
+        </TabsTrigger>
+        <TabsTrigger value="unsubscribe" asChild>
+          <Link href="/unsubscribe">Unsubscribe</Link>
         </TabsTrigger>
       </TabsList>
     </Tabs>
