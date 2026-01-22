@@ -6,10 +6,7 @@ A web app that helps you quickly clean up your Gmail inbox. Get smart suggestion
 
 - **Delete suggestions** - Identifies promotional emails, newsletters, and expired notifications that are safe to delete
 - **Archive suggestions** - Finds receipts, confirmations, and other emails worth keeping but not in your inbox
-
-### Coming Soon
-
-- **Unsubscribe** - Easily unsubscribe from mailing lists directly from the app
+- **Unsubscribe** - Unsubscribe from mailing lists with one click, supporting RFC 8058 one-click unsubscribe, web links, and mailto
 
 ## Getting Started
 
