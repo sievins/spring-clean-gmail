@@ -1,6 +1,6 @@
 # Spring Clean Gmail
 
-A web app that helps you quickly clean up your Gmail inbox. Get smart suggestions for emails to delete or archive, then confirm with one click.
+A web app that helps you quickly clean up your Gmail inbox. Get smart suggestions for emails to delete, archive or unsubscribe from, then confirm with one click.
 
 ## Features
 
